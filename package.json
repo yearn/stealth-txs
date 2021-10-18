@@ -1,14 +1,14 @@
 {
-  "name": "@lbertenasco/bonded-stealth-tx",
+  "name": "stealth-txs",
   "version": "1.0.0",
   "description": "bonded stealth tx vault smart contracts",
-  "homepage": "https://github.com/lbertenasco/bonded-stealth-tx#readme",
+  "homepage": "https://github.com/yearn/stealth-txs#readme",
   "bugs": {
-    "url": "https://github.com/lbertenasco/bonded-stealth-tx/issues"
+    "url": "https://github.com/yearn/stealth-txs/issues"
   },
   "repository": {
     "type": "git",
-    "url": "git+https://github.com/lbertenasco/bonded-stealth-tx.git"
+    "url": "git+https://github.com/yearn/stealth-txs.git"
   },
   "license": "MIT",
   "files": [

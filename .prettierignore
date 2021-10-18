@@ -9,6 +9,7 @@
 .config.json
 workspace.code-workspace
 .DS_STORE
+CHANGELOG.md
 
 # Hardhat
 artifacts
