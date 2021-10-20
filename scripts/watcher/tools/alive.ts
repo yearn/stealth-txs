@@ -1,4 +1,7 @@
-const MAX_UNRESPONSIVE_TIME = 5000;
+import moment from 'moment';
+
+const MAX_UNRESPONSIVE_TIME = moment.duration('5', 'seconds').as('milliseconds');
+
 let aliveInterval: NodeJS.Timeout;
 
 export const startCheck = (): void => {

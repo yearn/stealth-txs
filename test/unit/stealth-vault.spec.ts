@@ -203,14 +203,17 @@ describe('StealthVault', () => {
       let bondTx: TransactionResponse;
       let initialUserBalance: BigNumber;
       let initialContractBalance: BigNumber;
+      let usedGas: BigNumber;
       const bonding = utils.parseEther('1');
       given(async () => {
         initialUserBalance = await ethers.provider.getBalance(governor.address);
         initialContractBalance = await ethers.provider.getBalance(stealthVault.address);
-        bondTx = await stealthVault.bond({ value: bonding, gasPrice: 0 });
+        bondTx = await stealthVault.bond({ value: bonding });
+        const tx = await bondTx.wait();
+        usedGas = tx.cumulativeGasUsed.mul(tx.effectiveGasPrice);
       });
       then('eth is taken away from user', async () => {
-        expect(await ethers.provider.getBalance(governor.address)).to.be.equal(initialUserBalance.sub(bonding));
+        expect(await ethers.provider.getBalance(governor.address)).to.be.equal(initialUserBalance.sub(bonding).sub(usedGas));
       });
       then('eth is deposited in contract', async () => {
         expect(await ethers.provider.getBalance(stealthVault.address)).to.be.equal(initialContractBalance.add(bonding));
@@ -229,16 +232,19 @@ describe('StealthVault', () => {
       let bondTx: TransactionResponse;
       let initialUserBalance: BigNumber;
       let initialContractBalance: BigNumber;
+      let usedGas: BigNumber;
       const initialUserBonded = utils.parseEther('0.353');
       const bonding = utils.parseEther('1');
       given(async () => {
         await stealthVault.setBonded(governor.address, initialUserBonded);
         initialUserBalance = await ethers.provider.getBalance(governor.address);
         initialContractBalance = await ethers.provider.getBalance(stealthVault.address);
-        bondTx = await stealthVault.bond({ value: bonding, gasPrice: 0 });
+        bondTx = await stealthVault.bond({ value: bonding });
+        const tx = await bondTx.wait();
+        usedGas = tx.cumulativeGasUsed.mul(tx.effectiveGasPrice);
       });
       then('eth is taken away from user', async () => {
-        expect(await ethers.provider.getBalance(governor.address)).to.be.equal(initialUserBalance.sub(bonding));
+        expect(await ethers.provider.getBalance(governor.address)).to.be.equal(initialUserBalance.sub(bonding).sub(usedGas));
       });
       then('eth is deposited in contract', async () => {
         expect(await ethers.provider.getBalance(stealthVault.address)).to.be.equal(initialContractBalance.add(bonding));
@@ -269,6 +275,7 @@ describe('StealthVault', () => {
     let unbondTx: TransactionResponse;
     let initialUserBalance: BigNumber;
     let initialContractBalance: BigNumber;
+    let usedGas: BigNumber;
     given(async () => {
       args = args ?? [];
       await stealthVault.setTotalBonded(bonded);
@@ -277,7 +284,9 @@ describe('StealthVault', () => {
       await forceETHFactory.deploy(stealthVault.address, { value: bonded });
       initialContractBalance = await ethers.provider.getBalance(stealthVault.address);
       initialUserBalance = await ethers.provider.getBalance(governor.address);
-      unbondTx = await stealthVault[funcAndSignature](...args!, { gasPrice: 0 });
+      unbondTx = await stealthVault[funcAndSignature](...args!);
+      const tx = await unbondTx.wait();
+      usedGas = tx.cumulativeGasUsed.mul(tx.effectiveGasPrice);
     });
     then('amount bonded by user gets reduced', async () => {
       expect(await stealthVault.bonded(governor.address)).to.be.equal(bonded - unbond);
@@ -289,7 +298,7 @@ describe('StealthVault', () => {
       expect(await ethers.provider.getBalance(stealthVault.address)).to.be.equal(initialContractBalance.sub(unbond));
     });
     then('eth is sent to the user', async () => {
-      expect(await ethers.provider.getBalance(governor.address)).to.be.equal(initialUserBalance.add(unbond));
+      expect(await ethers.provider.getBalance(governor.address)).to.be.equal(initialUserBalance.add(unbond).sub(usedGas));
     });
     then('emits event', async () => {
       await expect(unbondTx)
@@ -465,9 +474,7 @@ describe('StealthVault', () => {
     when('not called from an external owned account', () => {
       let validateTx: Promise<TransactionResponse>;
       given(async () => {
-        validateTx = stealthVault
-          .connect(caller)
-          .validateHash(await wallet.generateRandomAddress(), utils.formatBytes32String('some-hash'), 0, { gasPrice: 0 });
+        validateTx = stealthVault.connect(caller).validateHash(await wallet.generateRandomAddress(), utils.formatBytes32String('some-hash'), 0);
       });
       then('tx is reverted with reason', async () => {
         await expect(validateTx).to.be.revertedWith('SV: not eoa');
@@ -476,7 +483,7 @@ describe('StealthVault', () => {
     when('caller doesnt have that job whitelisted', () => {
       let validateTx: Promise<TransactionResponse>;
       given(() => {
-        validateTx = stealthVault.connect(caller).validateHash(caller.address, utils.formatBytes32String('some-hash'), 0, { gasPrice: 0 });
+        validateTx = stealthVault.connect(caller).validateHash(caller.address, utils.formatBytes32String('some-hash'), 0);
       });
       then('tx is reverted with reason', async () => {
         await expect(validateTx).to.be.revertedWith('SV: contract not enabled');
@@ -488,7 +495,7 @@ describe('StealthVault', () => {
       given(async () => {
         jobMock = await jobMockFactory.deploy(stealthVault.address);
         await stealthVault.addCallerStealthContract(caller.address, jobMock.address);
-        validateTx = jobMock.connect(caller).validateHash(utils.formatBytes32String('some-hash'), 1, { gasPrice: 0 });
+        validateTx = jobMock.connect(caller).validateHash(utils.formatBytes32String('some-hash'), 1);
       });
       then('tx is reverted with reason', async () => {
         await expect(validateTx).to.be.revertedWith('SV: not enough bonded');
@@ -502,8 +509,8 @@ describe('StealthVault', () => {
         jobMock = await jobMockFactory.deploy(stealthVault.address);
         await stealthVault.setBonded(caller.address, penalty);
         await stealthVault.addCallerStealthContract(caller.address, jobMock.address);
-        await stealthVault.connect(caller).startUnbond({ gasPrice: 0 });
-        validateTx = jobMock.connect(caller).validateHash(utils.formatBytes32String('some-hash'), penalty, { gasPrice: 0 });
+        await stealthVault.connect(caller).startUnbond();
+        validateTx = jobMock.connect(caller).validateHash(utils.formatBytes32String('some-hash'), penalty);
       });
       then('tx is reverted with reason', async () => {
         await expect(validateTx).to.be.revertedWith('SV: unbonding');
@@ -517,8 +524,8 @@ describe('StealthVault', () => {
         jobMock = await jobMockFactory.deploy(stealthVault.address);
         await stealthVault.setBonded(caller.address, penalty);
         await stealthVault.addCallerStealthContract(caller.address, jobMock.address);
-        await stealthVault.connect(caller).startUnbond({ gasPrice: 0 });
-        await stealthVault.connect(caller).cancelUnbond({ gasPrice: 0 });
+        await stealthVault.connect(caller).startUnbond();
+        await stealthVault.connect(caller).cancelUnbond();
         validHash = await jobMock.connect(caller).callStatic.validateHash(utils.formatBytes32String('some-hash'), penalty);
       });
       then('returns true', () => {
@@ -536,7 +543,7 @@ describe('StealthVault', () => {
         await stealthVault.setBonded(caller.address, penalty);
         await stealthVault.addCallerStealthContract(caller.address, jobMock.address);
         validHash = await jobMock.connect(caller).callStatic.validateHash(hash, penalty);
-        validateTx = await jobMock.connect(caller).validateHash(hash, penalty, { gasPrice: 0 });
+        validateTx = await jobMock.connect(caller).validateHash(hash, penalty);
       });
       then('returns true', () => {
         expect(validHash).to.be.true;
@@ -558,7 +565,7 @@ describe('StealthVault', () => {
         await stealthVault.addCallerStealthContract(caller.address, jobMock.address);
         await stealthVault.setHashReportedBy(hash, hashReporter);
         validHash = await jobMock.connect(caller).callStatic.validateHash(hash, penalty);
-        validateTx = await jobMock.connect(caller).validateHash(hash, penalty, { gasPrice: 0 });
+        validateTx = await jobMock.connect(caller).validateHash(hash, penalty);
       });
       behavesLikePenaltyApplied({
         caller: () => caller.address,

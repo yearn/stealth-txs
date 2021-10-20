@@ -4,11 +4,12 @@ import { BigNumber, Contract, utils, Transaction, constants } from 'ethers';
 import { SignerWithAddress } from '@nomiclabs/hardhat-ethers/signers';
 import * as contracts from '../../utils/contracts';
 import Web3 from 'web3';
-import * as gasnow from './tools/gasnow';
+import * as gasprice from './tools/gasprice';
 import * as alive from './tools/alive';
 import { getChainId, getReporterPrivateKey, getWSUrl } from './tools/env';
 
 const MAX_GAS_PRICE = utils.parseUnits('350', 'gwei');
+const MAX_PRIORITY_FEE_GAS_PRICE = 30;
 const wsUrlProvider = getWSUrl(hardhatArguments.network!);
 const stealthVaultAddress = contracts.stealthVault[hardhatArguments.network! as contracts.DeployedNetwork];
 const stealthRelayerAddress = contracts.stealthRelayer[hardhatArguments.network! as contracts.DeployedNetwork];
@@ -34,27 +35,32 @@ const generateRandomNumber = (min: number, max: number): string => {
 };
 
 async function main(): Promise<void> {
-  await gasnow.start();
+  await gasprice.start();
   return new Promise(async (resolve) => {
     console.log(`Starting on network ${hardhatArguments.network!}(${chainId}) ...`);
+    alive.startCheck();
     console.log('Getting reporter ...');
     [reporterSigner] = await ethers.getSigners();
+    console.log('Reporter address:', reporterSigner.address);
     nonce = await reporterSigner.getTransactionCount();
     stealthVault = await ethers.getContractAt('contracts/StealthVault.sol:StealthVault', stealthVaultAddress, reporterSigner);
+    stealthVault.provider.call = ethersWebSocketProvider.call;
     stealthRelayer = await ethers.getContractAt('contracts/StealthRelayer.sol:StealthRelayer', stealthRelayerAddress, reporterSigner);
+    stealthRelayer.provider.call = ethersWebSocketProvider.call;
     console.log('Getting penalty ...');
     stealthRelayerPenalty = await stealthRelayer.penalty();
+    alive.stillAlive();
     console.log('Penalty set to', utils.formatEther(stealthRelayerPenalty));
     console.log('Getting callers ...');
     callers = (await stealthVault.callers()).map((caller: string) => normalizeAddress(caller));
+    alive.stillAlive();
     console.log('Getting callers jobs ...');
     for (let i = 0; i < callers.length; i++) {
       addCallerStealthContracts(callers[i], await stealthVault.callerContracts(callers[i]));
       console.log('Getting bonded from', callers[i]);
       addBond(callers[i], await stealthVault.bonded(callers[i]));
+      alive.stillAlive();
     }
-
-    alive.startCheck();
     ethersWebSocketProvider.on('pending', (txHash: string) => {
       ethersWebSocketProvider.getTransaction(txHash).then((transaction) => {
         alive.stillAlive();
@@ -118,22 +124,24 @@ async function checkTx(tx: Transaction) {
   if (!validBondForPenalty(tx.from!)) return;
   console.timeEnd(`Validate bond for penalty ${rand}-${tx.hash!}`);
   console.timeEnd(`Whole tx analysis ${tx.hash}`);
-  await reportHash(parsedTx.args._stealthHash, tx.gasPrice!);
+  await reportHash(parsedTx.args._stealthHash);
   console.log('*****************************************');
 }
 
-async function reportHash(hash: string, validatingGasPrice: BigNumber): Promise<void> {
+async function reportHash(hash: string): Promise<void> {
   console.log('reporting hash', hash);
   nonce++;
-  let rushGasPrice = validatingGasPrice.gt(gasnow.getGasPrice().rapid)
-    ? validatingGasPrice.add(validatingGasPrice.div(3))
-    : BigNumber.from(`${gasnow.getGasPrice().rapid}`);
-  rushGasPrice = rushGasPrice.gt(MAX_GAS_PRICE) ? MAX_GAS_PRICE : rushGasPrice;
-  const populatedTx = await stealthVault.populateTransaction.reportHash(hash, { gasLimit: 1000000, gasPrice: rushGasPrice, nonce });
+  const currentGas = gasprice.get(gasprice.Confidence.Highest);
+  const gasParams = {
+    maxFeePerGas: MAX_GAS_PRICE,
+    maxPriorityFeePerGas:
+      currentGas.maxPriorityFeePerGas > MAX_PRIORITY_FEE_GAS_PRICE ? MAX_PRIORITY_FEE_GAS_PRICE : currentGas.maxPriorityFeePerGas,
+  };
+  const populatedTx = await stealthVault.populateTransaction.reportHash(hash, { ...gasParams, gasLimit: 1000000, nonce });
   const signedtx = await web3.eth.accounts.signTransaction(
     {
+      ...gasParams,
       to: stealthVaultAddress,
-      gasPrice: `${rushGasPrice.toString()}`,
       gas: '100000',
       data: populatedTx.data!,
     },
@@ -214,10 +222,12 @@ main()
     process.exit(1);
   });
 
-process.on('uncaughtException', () => {
+process.on('uncaughtException', (err) => {
+  console.error('Uncaught exception:', err);
   process.exit(1);
 });
 
-process.on('unhandledRejection', () => {
+process.on('unhandledRejection', (err) => {
+  console.error('Unhandled rejection:', err);
   process.exit(1);
 });
